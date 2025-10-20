@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PEP — Protocolo PEC1 de Análise Clínica com IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, sans-serif; }
+        textarea, pre { font-family: ui-monospace, SFMono-Regular, monospace; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        .spinner { border: 4px solid rgba(255, 255, 255, 0.3); border-top: 4px solid white; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Garante que o texto em negrito e itálico se destaque na saída PRE */
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+        /* Correção para o texto forte (negrito) e ênfase (itálico) na caixa pre */
+        pre strong { font-weight: 700; color: #facc15; } /* Amarelo para negrito */
+        pre em { font-style: italic; color: #f87171; } /* Vermelho suave para itálico */
+        pre strong em { font-weight: 700; font-style: italic; color: #f97316; } /* Laranja para negrito e itálico */
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <header class="bg-gray-800 text-white py-4 shadow-xl border-b border-gray-700">
+        <div class="max-w-7xl mx-auto px-4">
+            <h1 class="text-2xl font-bold tracking-tight">PEP — Protocolo PEC1 de Análise Clínica com IA</h1>
+            <p class="text-sm text-gray-400">Geração de Registro Médico (PEC1) com Gemini API</p>
+        </div>
+    </header>
+    <main class="max-w-7xl mx-auto mt-8 p-4 grid lg:grid-cols-2 gap-6">
+        <section class="lg:col-span-2 bg-gray-800 rounded-xl card-shadow p-6 flex flex-col h-[550px]">
+            <h2 class="text-lg font-semibold mb-3 text-blue-400">1️⃣ Dados Brutos do Atendimento (Histórico e Atual)</h2>
+            <textarea id="entrada" rows="15" class="flex-1 bg-gray-900 text-gray-200 border border-gray-700 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                placeholder="Cole o histórico e o atendimento atual. Use '##' para marcar o início do atendimento de hoje (vigente), conforme o protocolo.
+                
+                EXEMPLO:
+                [...histórico de 6 meses atrás]
+                
+                ##
+                Paciente: Pedro, 78 anos, masculino.
+                Motivo: Renovação de receita (não presencial). Ultima consulta foi ##01.
+                MUC: Metoprolol 50mg, AAS 100mg, Gabapentina 300mg 3x/dia, Diazepam 5mg à noite.
+                Comorbidades: HAS, DM2.
+                Exames: Creatinina 1.8 (08/25).
+                "
+                ></textarea>
+            <div class="mt-4 flex gap-2 justify-end">
+                <button id="limpar" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg shadow transition duration-150">Limpar</button>
+                <button id="processar" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow transition duration-150 flex items-center justify-center" disabled>
+                    <span id="processar-text">Gerar Registro PEC1</span>
+                    <div id="processar-loading" class="spinner hidden"></div>
+                </button>
+            </div>
+        </section>
+
+        <section class="lg:col-span-2 bg-gray-800 rounded-xl card-shadow p-6 flex flex-col min-h-[500px]">
+            <h2 class="text-lg font-semibold mb-3 text-green-400">2️⃣ Registro Clínico PEC1 (CAIXA ALTA)</h2>
+            <pre id="organizado" class="flex-1 bg-gray-900 text-gray-200 p-3 rounded-lg overflow-auto text-sm border border-gray-700">Aguardando dados brutos do atendimento para gerar o PEC1...</pre>
+        </section>
+    </main>
+
+    <div class="max-w-7xl mx-auto px-4 pb-4">
+        <p id="status-message" class="text-sm text-gray-500 mt-4 text-center">Pronto para receber o texto.</p>
+        <footer class="text-center text-xs text-gray-600 pt-8">
+            <p>Protótipo PEC1 desenvolvido com Gemini API (google_search grounding ativado para análise farmacológica).</p>
+            <p class="mt-2 text-red-500 font-bold">
+                **ATENÇÃO:** Para executar no navegador, insira sua chave da API Gemini em `const API_KEY = "SUA_CHAVE_AQUI";` no código JavaScript.
+            </p>
+        </footer>
+    </div>
+
+
+    <script>
+        // =========================================================================
+        // ATENÇÃO: COLOQUE SUA CHAVE DA API AQUI PARA O PROTÓTIPO FUNCIONAR!
+        const API_KEY = "SUA_CHAVE_AQUI";
+        // =========================================================================
+
+        const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+        const MODEL = 'gemini-2.5-flash';
+        const API_URL_TEMPLATE = `${BASE_URL}${MODEL}:generateContent?key=${API_KEY}`;
+        
+        // DOM Elements
+        const entradaEl = document.getElementById('entrada');
+        const organizadoEl = document.getElementById('organizado');
+        const processarBtn = document.getElementById('processar');
+        const limparBtn = document.getElementById('limpar');
+        const statusMessageEl = document.getElementById('status-message');
+        const processarTextEl = document.getElementById('processar-text');
+        const processarLoadingEl = document.getElementById('processar-loading');
+
+        let isProcessing = false;
+
+        // --- Protocolo PEC1 Injetado no JS (Regras de Sistema) ---
+        const PROTOCOLO_PEC1_PROMPT = `
+        VOCÊ É O ASSISTENTE DE DOCUMENTAÇÃO CLÍNICA PEC1. SUA FUNÇÃO É GERAR UM REGISTRO CLÍNICO COM ALTA FIDELIDADE AO PROTOCOLO, ESTRITAMENTE EM CAIXA ALTA.
+
+        PROIBIDO: INTRODUÇÕES, COMENTÁRIOS, EXPLICAÇÕES FORA DA CONDUTA, NUMERAÇÃO DE ITENS.
+
+        1. ESTRUTURA DE SAÍDA OBRIGATÓRIA (CAIXA ALTA, NESTA ORDEM):
+        HMA:
+        HPP:
+        MUC:
+        EX FISICO:
+        AVALIAÇÃO MULTIDIMENSIONAL: (OMITIR SE NÃO APLICÁVEL)
+        EXAMES:
+        HD:
+        CONDUTA:
+
+        VERIFICAÇÃO BEERS / STOPP-START: (OMITIR SE NÃO APLICÁVEL)
+
+        2. MARCADORES TEMPORAIS:
+        O texto APÓS '##' OU 'ATUAL:' é o atendimento VIGENTE (consulta do dia). O texto ANTES é o histórico.
+
+        3. REGRAS DE EXCEÇÃO E RENOVAÇÕES:
+        - RENOVAÇÃO NÃO PRESENCIAL CONSECUTIVA (REGRA FINAL):
+            SE a consulta atual for marcada como ##01 ou ##02 E o histórico indicar que a última consulta também foi ##01 ou ##02, ENTÃO SUBSTITUA HD: e CONDUTA: por:
+                HD: SOLICITAÇÃO DE RENOVAÇÃO NÃO PRESENCIAL DE RECEITA MUC (SEGUNDO EPISÓDIO).
+                CONDUTA: SUGIRO AGENDAMENTO DE CONSULTA PRESENCIAL. CÓDIGO DE ÉTICA MÉDICA – ARTIGO 37: É VEDADO PRESCREVER SEM AVALIAÇÃO DIRETA DO PACIENTE, EXCETO EM SITUAÇÕES DE URGÊNCIA OU EM CASO DE CONTINUIDADE DE TRATAMENTO JÁ INICIADO.
+            *ESTA REGRA ANULA TODAS AS OUTRAS REGRAS DE HD E CONDUTA.*
+
+        4. REGRAS POR SEÇÃO:
+
+        HMA:
+        - Ordem Fixa (um item por linha): Motivo da consulta; Fora de Área (se aplicável); Idade e Sexo; Tempo desde último atendimento; Queixas/Sintomas.
+        - PROIBIDO: Incluir gatilhos geriátricos (são exclusivos da Avaliação Multidimensional).
+
+        HPP:
+        - Linha única; diagnósticos separados por ';'. Usar CID-10. Se incerto, usar CID + '*'.
+        - Se não houver: 'NEGA COMORBIDADES.'
+
+        MUC:
+        - Linha única; separados por ';'.
+        - Benzodiazepínicos em ***NEGRIFO E ITÁLICO***.
+        - Se não houver: 'SEM MEDICAMENTOS DE USO CONTÍNUO.'
+
+        EX FISICO:
+        - Presencial: 'BEG, EUPNEICO, LOTE, FC E PA AFERIDAS POR ENFERMAGEM; [ACHADOS].'
+        - Não Presencial (##01/##02): 'IMPOSSÍVEL, PACIENTE NÃO PRESENTE NO MOMENTO.'
+
+        AVALIAÇÃO MULTIDIMENSIONAL:
+        - REQUISITOS: Idade >= 65 anos E Presença de pelo menos um gatilho geriátrico (queda, memória, sono, incontinência, etc.) no texto bruto.
+        - Se aplicável, use o modelo padrão (abaixo) e APENAS ALTERE e DESTAQUE o achado em ***NEGRIFO E ITÁLICO***.
+        - MODELO PADRÃO: PLENAMENTE FUNCIONAL, BOA ACEITAÇÃO ALIMENTAR E HÍDRICA, NEGA INCONTINÊNCIA, NEGA ALTERAÇÕES EM HÁBITOS INTESTINAIS. SONO REPARADOR, NEGA ALTERAÇÕES DE HUMOR, NEGA ALTERAÇÕES DE MEMÓRIA QUE ALTEREM QUALIDADE DE VIDA. ATIVIDADE FÍSICA REGULAR. NEGA ALTERAÇÕES AUDITIVAS. USO DE ÓCULOS. NEGA QUEDAS NO ÚLTIMO ANO.
+
+        EXAMES:
+        - Listar com data (MM/AA). Alterados em ***NEGRIFO E ITÁLICO***.
+        - Manter ALTERADOS sempre. Omitir normais com >1 ano.
+        - Se Creatinina+Idade+Sexo disponíveis, CALCULAR CKD-EPI (2021) e classificar DRC. Adicionar: 'DRC ESTÁGIO [X] (CKD-EPI: [VALOR] ML/MIN)'.
+        - Se não houver: 'SEM EXAMES DISPONÍVEIS.'
+
+        HD:
+        - Diagnósticos novos ou descompensados da consulta atual, um por linha.
+
+        CONDUTA:
+        - Uma ação por linha.
+        - SEMPRE INCLUIR: 'MANTER MEDICAMENTOS DE USO CONTÍNUO.' e 'MANTER SOLICITAÇÕES ANTERIORES EM ANDAMENTO.'
+        - INCLUIR CONDUTAS AUTOMÁTICAS (SE APLICÁVEL): >=65 ANOS (Sangue Oculto nas Fezes, IVCF-20); DM (Fundo de Olho, Microalbuminúria, Avaliação dos Pés); Mulher >=50 ANOS (Mamografia/Colpocitologia).
+        - Fora de área: 'ATUALIZAR ENDEREÇO DO PACIENTE NO CADASTRO.'
+        - JUSTIFICAR TODOS OS '*' NO FINAL DESTA SEÇÃO.
+
+        VERIFICAÇÃO BEERS / STOPP-START:
+        - Aplicar APENAS para pacientes >= 65 anos com MUC.
+        - Usar Google Search (Grounding) para confirmar alertas farmacológicos (Beers/STOPP).
+        - Use os modelos: '⚠ [FÁRMACO] → POTENCIALMENTE INAPROPRIADO SEGUNDO BEERS. MOTIVO: [...]' ou '⚠ OMISSÃO TERAPÊUTICA → CONSIDERAR [CLASSE/FÁRMACO], SEGUNDO START. MOTIVO: [...]'.
+        `;
+
+        /**
+         * Wrapper para a chamada da API Gemini.
+         */
+        async function callGemini(userPrompt, systemInstruction, useGrounding = false) {
+            if (API_KEY === "SUA_CHAVE_AQUI" || !API_KEY) {
+                 throw new Error("API Key não configurada. Por favor, insira sua chave no código JavaScript.");
+            }
+
+            const payload = {
+                contents: [{ parts: [{ text: userPrompt }] }],
+                config: {
+                    systemInstruction: systemInstruction,
+                    // Grounding (Google Search) ativado para a análise e o CKD-EPI
+                    ...(useGrounding && { tools: [{ googleSearch: {} }] }),
+                    // A temperatura baixa ajuda a IA a ser mais literal com as regras
+                    temperature: 0.1 
+                }
+            };
+
+            const response = await fetch(API_URL_TEMPLATE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error("API Error Response:", errorData);
+                throw new Error(`Falha na API: ${response.status} ${response.statusText}. Detalhes: ${errorData.error?.message || JSON.stringify(errorData)}`);
+            }
+
+            const result = await response.json();
+            return result?.candidates?.[0]?.content?.parts?.[0]?.text || "Erro: IA não retornou conteúdo.";
+        }
+
+        // --- Application Logic ---
+
+        function updateUIState(processing) {
+            isProcessing = processing;
+            entradaEl.disabled = processing;
+            processarBtn.disabled = processing || entradaEl.value.trim() === '';
+            limparBtn.disabled = processing;
+            
+            if (processing) {
+                processarTextEl.textContent = 'Gerando PEC1...';
+                processarLoadingEl.classList.remove('hidden');
+            } else {
+                processarTextEl.textContent = 'Gerar Registro PEC1';
+                processarLoadingEl.classList.add('hidden');
+            }
+        }
+
+        async function processarEntrada() {
+            const textoBruto = entradaEl.value.trim();
+            if (!textoBruto) {
+                statusMessageEl.textContent = "Por favor, cole o texto do atendimento.";
+                return;
+            }
+            if (API_KEY === "AIzaSyBGZnfWllHK4_xD-c-NoGZoy3n3cIjc2lY" || !API_KEY) {
+                statusMessageEl.textContent = "ERRO: Chave da API Gemini não configurada. Insira sua chave no código.";
+                return;
+            }
+
+            updateUIState(true);
+            organizadoEl.textContent = 'Processando dados... Isso pode levar alguns segundos devido à complexidade do protocolo e do grounding.';
+            statusMessageEl.textContent = 'Iniciando Processamento: Aplicação rigorosa das regras PEC1...';
+
+            try {
+                // Chamada única com o protocolo rigoroso e grounding para cálculo/análise.
+                const registroPEC1 = await callGemini(textoBruto, PROTOCOLO_PEC1_PROMPT, true);
+                
+                // Formatação final: Garante a saída em texto simples (para simular a saída de um chat)
+                organizadoEl.textContent = registroPEC1;
+                statusMessageEl.textContent = 'Registro PEC1 concluído com sucesso. Verifique o resultado.';
+
+            } catch (error) {
+                console.error("Erro no processamento:", error);
+                statusMessageEl.textContent = `ERRO: Falha ao gerar o registro PEC1. ${error.message}`;
+                organizadoEl.textContent = `ERRO: Não foi possível completar a geração do registro. Verifique o console ou a API Key.`;
+            } finally {
+                updateUIState(false);
+            }
+        }
+
+        function limparCampos() {
+            if (isProcessing) return;
+            entradaEl.value = '';
+            organizadoEl.textContent = 'Aguardando dados brutos do atendimento para gerar o PEC1...';
+            statusMessageEl.textContent = 'Pronto para receber o texto.';
+            updateUIState(false);
+        }
+
+        // --- Event Listeners ---
+        limparBtn.addEventListener('click', limparCampos);
+        processarBtn.addEventListener('click', processarEntrada);
+        entradaEl.addEventListener('input', () => {
+            processarBtn.disabled = isProcessing || entradaEl.value.trim() === '';
+        });
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', () => {
+            processarBtn.disabled = entradaEl.value.trim() === '';
+        });
+
+    </script>
+</body>
+</html>
